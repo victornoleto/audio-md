@@ -1,0 +1,53 @@
+[project]
+name = "audio-md"
+version = "0.1.0"
+description = "Transcribe an audio file locally (faster-whisper) and summarize it into Markdown via an agent CLI (claude/opencode/codex)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Victor Noleto", email = "victornoleto95@gmail.com" }]
+keywords = ["audio", "transcription", "whisper", "summarization", "llm"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "rich>=13.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# Heavy local speech-to-text backend. Install with: uv sync --extra transcribe
+transcribe = [
+    "faster-whisper>=1.0",
+]
+# GPU acceleration: cuDNN 9 + cuBLAS 12 for ctranslate2 (NVIDIA only). Preloaded
+# at runtime by transcribe.py, so no LD_LIBRARY_PATH needed. Install alongside:
+#   uv sync --extra transcribe --extra gpu
+gpu = [
+    "nvidia-cublas-cu12",
+    "nvidia-cudnn-cu12>=9,<10",
+]
+
+[project.scripts]
+audio-md = "audio_md.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/victornoleto/audio-md"
+Repository = "https://github.com/victornoleto/audio-md"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/audio_md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
