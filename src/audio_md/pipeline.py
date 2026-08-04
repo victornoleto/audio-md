@@ -1,17 +1,20 @@
-"""Hash → transcribe → summarize for a single audio file.
+"""Hash/download → transcribe → summarize for one audio file or YouTube video.
 
-Output goes to ``<outdir>/<sha256>/`` — the hash is the folder name, so the same
-audio is never reprocessed (natural cache). Use ``--force`` to override.
+Output goes to ``<outdir>/audios/<sha256>/`` for local files and
+``<outdir>/youtube/<video-id>/`` for videos — the folder name identifies the
+source, so the same input is never reprocessed (natural cache). Use ``--force``
+to override.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
-from audio_md import console, providers, summarize as _summarize, transcribe as _transcribe
+from audio_md import console, providers, summarize as _summarize, transcribe as _transcribe, youtube
 from audio_md.hashing import sha256_of
 
 # Short, git-style folder name. 8 hex chars = 32 bits — plenty for a personal cache.
@@ -64,26 +67,54 @@ def run(audio_path: str, settings) -> int:
         console.warn(f"file not found: {audio}")
         return 1
 
-    # 1) Hash -> output folder ------------------------------------------------
+    # Hash -> output folder ----------------------------------------------------
     console.step(f"Hashing [bold]{audio.name}[/bold]")
     digest = sha256_of(audio)
     short = digest[:SHORT_HASH_LEN]
-    outdir = Path(settings.outdir).expanduser().resolve() / short
+    console.note(f"{short} [dim]({digest})[/dim]")
+    outdir = Path(settings.outdir).expanduser().resolve() / "audios" / short
+    return _process(audio, outdir, {"source_filename": audio.name, "sha256": digest}, settings)
+
+
+def run_youtube(video_id: str, settings) -> int:
+    outdir = Path(settings.outdir).expanduser().resolve() / "youtube" / video_id
+    meta: dict = {"video_id": video_id}
+
+    # The id names the folder, so a cached transcript means no download at all.
+    if (outdir / "transcript.txt").exists() and not settings.force:
+        return _process(None, outdir, meta, settings)
+
+    console.step(f"Downloading [bold]{video_id}[/bold]")
+    with tempfile.TemporaryDirectory(prefix="audio-md-") as tmp:
+        try:
+            with console.status("fetching audio (yt-dlp)"):
+                audio, info = youtube.download_audio(video_id, Path(tmp))
+        except Exception as e:  # noqa: BLE001
+            console.warn(f"download failed: {e}")
+            return 1
+        meta.update(info)
+        console.note(info.get("title") or video_id)
+        return _process(audio, outdir, meta, settings)
+
+
+def _process(audio: Path | None, outdir: Path, meta: dict, settings) -> int:
+    """Transcribe (cached) + summarize (cached) + meta.json into ``outdir``.
+
+    ``audio`` may be None only when transcript.txt is already cached.
+    """
     outdir.mkdir(parents=True, exist_ok=True)
     transcript_path = outdir / "transcript.txt"
     summary_path = outdir / "summary.md"
     meta_path = outdir / "meta.json"
-    console.note(f"{short} [dim]({digest})[/dim]")
     console.note(f"output: {outdir}")
 
-    meta: dict = {"source_filename": audio.name, "sha256": digest}
     if meta_path.exists():
         try:
             meta.update(json.loads(meta_path.read_text(encoding="utf-8")))
         except Exception:
             pass
 
-    # 2) Transcribe (cached) --------------------------------------------------
+    # Transcribe (cached) -------------------------------------------------------
     if transcript_path.exists() and not settings.force:
         console.step("Transcribe [dim](cached)[/dim]")
         transcript = transcript_path.read_text(encoding="utf-8")
@@ -92,7 +123,7 @@ def run(audio_path: str, settings) -> int:
         transcript_path.write_text(transcript + "\n", encoding="utf-8")
         console.note(f"{len(transcript)} chars in {meta['transcribe_sec']}s")
 
-    # 3) Summarize (cached) ---------------------------------------------------
+    # Summarize (cached) --------------------------------------------------------
     if settings.no_summary:
         console.note("skipping summary (--no-summary)")
     elif not transcript:
@@ -114,7 +145,7 @@ def run(audio_path: str, settings) -> int:
         except Exception as e:  # noqa: BLE001
             console.warn(f"summary failed: {e}")
 
-    # 4) meta.json + final report --------------------------------------------
+    # meta.json + final report --------------------------------------------------
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     console.info("")

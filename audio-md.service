@@ -1,0 +1,18 @@
+# Template — `make install` replaces __DIR__ with the repo path and copies this
+# to ~/.config/systemd/user/. User-level service: manage it with `systemctl --user`.
+
+[Unit]
+Description=audio-md web — transcrição e resumo de áudios
+After=network.target
+
+[Service]
+WorkingDirectory=__DIR__
+# Entry point straight from .venv (no uv at boot). Port/config come from the repo's .env.
+ExecStart=__DIR__/.venv/bin/audio-md-web
+# The summary agent CLIs (claude/opencode/codex) are resolved via PATH:
+Environment=PATH=%h/.local/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
