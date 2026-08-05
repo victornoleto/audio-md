@@ -154,9 +154,16 @@ echo "127.0.0.1 audio-md.local" | sudo tee -a /etc/hosts
 
 → **http://audio-md.local:8765**
 
-`/etc/hosts` só resolve nome → IP, não mapeia porta; para servir em
-`http://audio-md.local` (sem `:8765`) seria preciso um proxy na porta 80
-(nginx/caddy) — fora do escopo deste setup.
+`/etc/hosts` só resolve nome → IP, não mapeia porta. Para acessar **sem** a
+porta (**http://audio-md.local**), use o proxy nginx incluído no repositório
+(`audio-md.nginx.conf` — repassa a porta 80 para a 8765, com
+`client_max_body_size 1g` para os uploads não esbarrarem no limite do nginx):
+
+```bash
+sudo cp audio-md.nginx.conf /etc/nginx/sites-available/audio-md.local
+sudo ln -sf ../sites-available/audio-md.local /etc/nginx/sites-enabled/audio-md.local
+sudo nginx -t && sudo systemctl reload nginx
+```
 
 ### Operação
 
