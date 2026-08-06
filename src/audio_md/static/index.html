@@ -26,7 +26,7 @@
   <section id="view-home" hidden>
     <h1 class="display">Áudios viram texto.</h1>
     <p class="lede">Arraste as mensagens de voz — várias partes, um assunto só. Elas são
-    transcritas na ordem e resumidas num texto único.</p>
+    transcritas na ordem e resumidas num texto único. Ou cole o link de um vídeo do YouTube.</p>
 
     <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Adicionar áudios">
       <div class="wave" aria-hidden="true">
@@ -35,6 +35,12 @@
       <p class="dz-label"><strong>Arraste os áudios aqui</strong><span>ou clique para escolher</span></p>
       <input id="file-input" type="file" multiple
              accept="audio/*,.opus,.ogg,.oga,.m4a,.mp3,.wav,.aac,.flac" hidden>
+    </div>
+
+    <div class="url-row">
+      <input id="url-input" type="url" inputmode="url" autocomplete="off" spellcheck="false"
+             placeholder="ou cole um link do YouTube" aria-label="Link de um vídeo do YouTube">
+      <button id="url-go" type="button">Transcrever</button>
     </div>
 
     <div id="queue" hidden>

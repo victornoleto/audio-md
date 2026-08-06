@@ -85,6 +85,39 @@ com `--beam-size 1`.
 
 ---
 
+## Docker (alternativa rápida)
+
+Para rodar sem instalar `uv`, `ffmpeg` e whisper no host. Precisa só de Docker com
+Compose — nada da seção de instalação acima se aplica aqui.
+
+```bash
+make docker-up      # constrói e sobe → http://127.0.0.1:8765
+make docker-login   # uma vez: login do CLI que gera o resumo
+```
+
+O dia a dia: `make docker-logs`, `make docker-down` e
+`make docker-cli ARGS="/app/inputs/a.mp3"` para o CLI (arquivos colocados em `inputs/`).
+
+- **GPU é automática.** A mesma imagem serve as duas máquinas: se o Docker expõe o
+  runtime nvidia, o `make docker-up` liga a GPU sozinho; se não, transcreve na CPU.
+- **Sem GPU, troque o modelo.** O padrão `large-v3` é pesado demais na CPU — use
+  `WHISPER_MODEL=small` no `.env`.
+- **Configuração é o mesmo `.env`.** A exceção é a porta: dentro do container o app
+  escuta sempre em 8765, e quem escolhe a porta publicada no host é `HOST_PORT` — um
+  `WEB_PORT` no `.env` não vale aqui (o `environment` do compose tem precedência sobre
+  o `env_file`), justamente para um `WEB_PORT=80` não fazer o processo não-root tentar
+  bindar porta privilegiada. Com `HOST_PORT=80`, o `audio-md.local` funciona sem o nginx.
+- **Os arquivos saem com o seu usuário.** O `make docker-up` passa o seu uid/gid para o
+  build em `APP_UID`/`APP_GID` — e não em `UID`/`GID`, que são readonly em bash e zsh —
+  para `outputs/` não ficar de root.
+- **O login fica separado do seu.** O container tem o próprio diretório de
+  credenciais (volume `audio-md_claude-auth`); o `claude` do host não é tocado.
+
+`outputs/` é compartilhado com o host, então o cache de transcrição vale para os
+dois caminhos.
+
+---
+
 ## Uso (CLI)
 
 ```bash
@@ -122,6 +155,12 @@ juntada + um único resumo, lado a lado. Os grupos ficam em
 `outputs/groups/{hash-do-grupo}/` e servem de histórico do site; as transcrições
 por arquivo compartilham o cache do CLI em `outputs/audios/`, nos dois sentidos.
 A configuração vem do `.env` (a UI não tem opções).
+
+Também aceita **link do YouTube**: cole a URL no campo abaixo da dropzone e o
+vídeo vira um grupo de um item só. O áudio é baixado, transcrito para
+`outputs/youtube/{video-id}/` — o mesmo cache do CLI, nos dois sentidos — e
+resumido como qualquer outro grupo. Um vídeo já processado pelo CLI não é
+baixado de novo.
 
 ### Rodando como serviço (systemd)
 

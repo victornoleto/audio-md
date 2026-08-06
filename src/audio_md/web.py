@@ -23,7 +23,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request
 
-from audio_md import providers, summarize as _summarize, transcribe as _transcribe
+from audio_md import providers, summarize as _summarize, transcribe as _transcribe, youtube
 from audio_md.config import Settings, load_env
 from audio_md.hashing import sha256_of
 from audio_md.pipeline import SHORT_HASH_LEN
@@ -73,6 +73,10 @@ def index():
 
 @app.post("/api/jobs")
 def create_job():
+    url = (request.form.get("url") or "").strip()
+    if url:
+        return _create_youtube_job(url)
+
     uploads = request.files.getlist("files")
     if not uploads:
         return jsonify({"error": "nenhum arquivo enviado"}), 400
@@ -103,6 +107,27 @@ def create_job():
             shutil.rmtree(tmpdir, ignore_errors=True)
             return jsonify({"id": gid}), 201
         job = {"id": gid, "status": "queued", "error": None, "tmpdir": str(tmpdir), "files": files}
+        _jobs[gid] = job
+        _queue.put(job)
+    return jsonify({"id": gid}), 201
+
+
+def _create_youtube_job(url: str):
+    video_id = youtube.video_id_of(url)
+    if video_id is None:
+        return jsonify({"error": "link do YouTube inválido"}), 400
+
+    gid = group_hash([f"youtube:{video_id}"])
+    with _jobs_lock:
+        existing = _jobs.get(gid)
+        if _finished(gid) or (existing and existing["status"] != "error"):
+            return jsonify({"id": gid}), 201
+        job = {
+            "id": gid, "status": "queued", "error": None, "tmpdir": None,
+            "video_id": video_id,
+            "files": [{"name": url, "sha256": None, "path": None,
+                       "status": "pending", "progress": 0.0, "duration_sec": None}],
+        }
         _jobs[gid] = job
         _queue.put(job)
     return jsonify({"id": gid}), 201
@@ -176,10 +201,16 @@ def _worker() -> None:
             job["status"] = "error"
             job["error"] = str(e)
         finally:
-            shutil.rmtree(job["tmpdir"], ignore_errors=True)
+            if job["tmpdir"]:
+                shutil.rmtree(job["tmpdir"], ignore_errors=True)
 
 
 def _run_job(job: dict) -> None:
+    transcripts = _transcribe_youtube(job) if job.get("video_id") else _transcribe_uploads(job)
+    _finish_group(job, transcripts)
+
+
+def _transcribe_uploads(job: dict) -> list[str]:
     job["status"] = "transcribing"
     model = None  # (device, WhisperModel), loaded on the first cache miss and reused
     transcripts: list[str] = []
@@ -207,7 +238,55 @@ def _run_job(job: dict) -> None:
         transcripts.append(text)
 
     model = None  # release VRAM between jobs  # noqa: F841
+    return transcripts
 
+
+def _transcribe_youtube(job: dict) -> list[str]:
+    video_id = job["video_id"]
+    f = job["files"][0]
+    vdir = _outdir() / "youtube" / video_id
+    tpath = vdir / "transcript.txt"
+
+    if tpath.exists():
+        f["status"], f["progress"] = "cached", 1.0
+        try:
+            cached = json.loads((vdir / "meta.json").read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            cached = {}
+        f["name"] = cached.get("title") or f["name"]
+        f["duration_sec"] = cached.get("duration_sec")
+        job["youtube"] = _video_info(cached, video_id)
+        return [tpath.read_text(encoding="utf-8").strip()]
+
+    job["status"] = f["status"] = "downloading"
+    tmp = Path(tempfile.mkdtemp(prefix="audio-md-web-yt-"))
+    job["tmpdir"] = str(tmp)
+    audio, info = youtube.download_audio(video_id, tmp)
+
+    job["status"] = f["status"] = "transcribing"
+    f["name"] = info.get("title") or f["name"]
+    meta = {"video_id": video_id, **info}
+    text, _ = _transcribe_file(Path(audio), f, meta, None)
+
+    vdir.mkdir(parents=True, exist_ok=True)
+    tpath.write_text(text + "\n", encoding="utf-8")
+    (vdir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    f["status"], f["progress"] = "done", 1.0
+    f["duration_sec"] = meta.get("duration_sec")
+    job["youtube"] = _video_info(meta, video_id)
+    return [text]
+
+
+def _video_info(meta: dict, video_id: str) -> dict:
+    return {
+        "video_id": video_id,
+        "url": meta.get("url") or f"https://www.youtube.com/watch?v={video_id}",
+        "title": meta.get("title"),
+        "uploader": meta.get("uploader"),
+    }
+
+
+def _finish_group(job: dict, transcripts: list[str]) -> None:
     merged = "\n\n".join(t for t in transcripts if t).strip()
     gdir = _group_dir(job["id"])
     gdir.mkdir(parents=True, exist_ok=True)
@@ -219,6 +298,8 @@ def _run_job(job: dict) -> None:
         "files": [{"name": f["name"], "sha256": f["sha256"], "duration_sec": f["duration_sec"]}
                   for f in job["files"]],
     }
+    if job.get("youtube"):
+        meta["youtube"] = job["youtube"]
     # A summary failure must never discard a finished transcript: the job still
     # completes, the error is recorded, and resubmitting the group retries it.
     binary = providers.BINARIES[_settings.provider]
@@ -294,10 +375,13 @@ def main() -> int:
     load_env([Path.cwd()])
     _settings = Settings.resolve(_default_args())
     start_worker()
+    # Loopback by default (nothing reaches the network). A container sets
+    # WEB_HOST=0.0.0.0 and lets the port publishing keep it on the host's loopback.
+    host = os.getenv("WEB_HOST", "127.0.0.1")
     port = int(os.getenv("WEB_PORT", "8765"))
-    print(f"audio-md web · http://127.0.0.1:{port}")
+    print(f"audio-md web · http://{'127.0.0.1' if host == '0.0.0.0' else host}:{port}")
     # debug=False: the reloader would fork a second process and duplicate the worker.
-    app.run(host="127.0.0.1", port=port, threaded=True, debug=False)
+    app.run(host=host, port=port, threaded=True, debug=False)
     return 0
 
 

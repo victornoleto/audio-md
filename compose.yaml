@@ -1,0 +1,32 @@
+name: audio-md
+
+services:
+  audio-md:
+    build:
+      context: .
+      args:
+        UID: ${APP_UID:-1000}
+        GID: ${APP_GID:-1000}
+    image: audio-md:latest
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:${HOST_PORT:-8765}:8765"
+
+    environment:
+      WEB_HOST: "0.0.0.0"
+      WEB_PORT: "8765"
+
+    env_file:
+      - path: .env
+        required: false
+
+    volumes:
+      - ./outputs:/app/outputs
+      - ./inputs:/app/inputs
+      - claude-auth:/home/app/.claude
+      - hf-cache:/home/app/.cache/huggingface
+
+volumes:
+  claude-auth:
+  hf-cache:

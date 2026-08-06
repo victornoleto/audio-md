@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import io
+import shutil
 
 import pytest
 
@@ -83,6 +84,61 @@ def test_summary_failure_keeps_transcript_and_is_retryable(client, monkeypatch):
     data = client.get(f"/api/jobs/{gid}").get_json()
     assert data["summary"].strip() == "## ok"
     assert "summary_error" not in data["meta"]
+
+
+def _submit_url(client, url):
+    return client.post("/api/jobs", data={"url": url}, content_type="multipart/form-data")
+
+
+@pytest.fixture
+def fake_download(monkeypatch):
+    def download(video_id, dest):
+        path = dest / f"{video_id}.m4a"
+        path.write_bytes(b"audio")
+        return path, {
+            "video_id": video_id,
+            "url": f"https://www.youtube.com/watch?v={video_id}",
+            "title": "Um vídeo",
+            "uploader": "Canal",
+        }
+
+    monkeypatch.setattr(web.youtube, "download_audio", download)
+    return download
+
+
+def test_youtube_url_becomes_a_group(client, fake_download, tmp_path):
+    res = _submit_url(client, "https://www.youtube.com/watch?v=awdC4RZdT8A")
+    assert res.status_code == 201
+    gid = res.get_json()["id"]
+
+    _drain()
+    data = client.get(f"/api/jobs/{gid}").get_json()
+    assert data["status"] == "done"
+    assert data["transcript"] == "texto de Um vídeo"
+    assert data["summary"].strip() == "## ok"
+    assert data["meta"]["youtube"]["title"] == "Um vídeo"
+    assert (tmp_path / "youtube" / "awdC4RZdT8A" / "transcript.txt").exists()
+
+
+def test_youtube_reuses_the_cli_cache_instead_of_downloading(client, fake_download, tmp_path, monkeypatch):
+    gid = _submit_url(client, "https://www.youtube.com/watch?v=awdC4RZdT8A").get_json()["id"]
+    _drain()
+
+    shutil.rmtree(tmp_path / "groups")  # only the group is gone; youtube/<id>/ remains
+    web._jobs.clear()
+    monkeypatch.setattr(web.youtube, "download_audio", lambda *a: pytest.fail("baixou de novo"))
+
+    assert _submit_url(client, "https://youtu.be/awdC4RZdT8A").get_json()["id"] == gid
+    _drain()
+    data = client.get(f"/api/jobs/{gid}").get_json()
+    assert data["status"] == "done"
+    assert data["transcript"] == "texto de Um vídeo"
+
+
+def test_youtube_rejects_a_non_youtube_url(client):
+    res = _submit_url(client, "https://example.com/algum-video")
+    assert res.status_code == 400
+    assert "inválido" in res.get_json()["error"]
 
 
 def test_history_and_disk_fallback(client):

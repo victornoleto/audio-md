@@ -107,6 +107,29 @@ button { font: inherit; cursor: pointer; }
 .dz-label strong { display: block; font-family: var(--display); font-weight: 500; font-size: 1.15rem; }
 .dz-label span { color: var(--muted); font-size: .9rem; }
 
+.url-row { display: flex; gap: .5rem; margin-top: .75rem; }
+
+.url-row input {
+  flex: 1; min-width: 0; font: inherit; font-size: .95rem; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: .75rem .9rem;
+}
+.url-row input::placeholder { color: var(--muted); }
+.url-row input:hover, .url-row input:focus { border-color: var(--accent); }
+
+.url-row button {
+  flex: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 12px; padding: .75rem 1.1rem;
+  font-family: var(--display); font-weight: 500;
+}
+.url-row button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-ink); }
+.url-row button:disabled { opacity: .6; cursor: default; }
+
+@media (max-width: 520px) {
+  .url-row { flex-wrap: wrap; }
+  .url-row button { width: 100%; }
+}
+
 .hint { color: var(--muted); font-size: .85rem; margin: 1.75rem 0 .5rem; }
 
 /* Thread: the audio list styled as a voice-message thread ---------------- */
