@@ -265,8 +265,8 @@ def _transcribe_youtube(job: dict) -> list[str]:
 
     job["status"] = f["status"] = "transcribing"
     f["name"] = info.get("title") or f["name"]
-    meta = {"video_id": video_id, **info}
-    text, _ = _transcribe_file(Path(audio), f, meta, None)
+    meta = dict(info)  # download_audio already includes video_id
+    text, _ = _transcribe_file(audio, f, meta, None)
 
     vdir.mkdir(parents=True, exist_ok=True)
     tpath.write_text(text + "\n", encoding="utf-8")
