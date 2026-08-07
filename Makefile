@@ -59,8 +59,5 @@ docker-login:  ## login do CLI de resumo dentro do container (uma vez só)
 docker-cli:  ## roda o CLI no container (ex.: make docker-cli ARGS="/app/inputs/a.mp3")
 	$(DC) run --rm audio-md audio-md $(ARGS)
 
-docker-test:  ## roda os testes dentro da imagem
-	$(DC) run --rm audio-md pytest -q
-
 .PHONY: help deps run test install uninstall start stop restart status logs \
-        docker-up docker-down docker-logs docker-login docker-cli docker-test
+        docker-up docker-down docker-logs docker-login docker-cli
