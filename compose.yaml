@@ -16,6 +16,8 @@ services:
     environment:
       WEB_HOST: "0.0.0.0"
       WEB_PORT: "8765"
+      # compose.gpu.yaml overrides this to "auto" when make docker-up detects the GPU
+      WHISPER_DEVICE: "cpu"
 
     env_file:
       - path: .env

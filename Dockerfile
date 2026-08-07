@@ -11,9 +11,6 @@ RUN groupadd -g "${GID}" app \
     && useradd -m -u "${UID}" -g "${GID}" -d /home/app app \
     && mkdir -p /app && chown app:app /app
 
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
-
 USER app
 WORKDIR /app
 
@@ -34,5 +31,4 @@ COPY --chown=app:app README.md ./
 COPY --chown=app:app src ./src
 RUN uv sync --frozen --no-dev --extra transcribe --extra gpu
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["audio-md-web"]

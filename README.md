@@ -102,11 +102,13 @@ O dia a dia: `make docker-logs`, `make docker-down` e
   runtime nvidia, o `make docker-up` liga a GPU sozinho; se não, transcreve na CPU.
 - **Sem GPU, troque o modelo.** O padrão `large-v3` é pesado demais na CPU — use
   `WHISPER_MODEL=small` no `.env`.
-- **Configuração é o mesmo `.env`.** A exceção é a porta: dentro do container o app
-  escuta sempre em 8765, e quem escolhe a porta publicada no host é `HOST_PORT` — um
-  `WEB_PORT` no `.env` não vale aqui (o `environment` do compose tem precedência sobre
-  o `env_file`), justamente para um `WEB_PORT=80` não fazer o processo não-root tentar
-  bindar porta privilegiada. Com `HOST_PORT=80`, o `audio-md.local` funciona sem o nginx.
+- **Configuração é o mesmo `.env`.** Duas exceções, que o compose declara por conta
+  própria (o `environment` tem precedência sobre o `env_file`): a **porta** — dentro do
+  container o app escuta sempre em 8765, e quem escolhe a porta publicada no host é
+  `HOST_PORT`, justamente para um `WEB_PORT=80` não fazer o processo não-root tentar
+  bindar porta privilegiada (com `HOST_PORT=80`, o `audio-md.local` funciona sem o
+  nginx); e o **device** — `WHISPER_DEVICE` é `cpu` por padrão e vira `auto` quando o
+  `make docker-up` detecta a GPU.
 - **Os arquivos saem com o seu usuário.** O `make docker-up` passa o seu uid/gid para o
   build em `APP_UID`/`APP_GID` — e não em `UID`/`GID`, que são readonly em bash e zsh —
   para `outputs/` não ficar de root.

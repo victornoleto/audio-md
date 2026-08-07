@@ -1,5 +1,7 @@
 services:
   audio-md:
+    environment:
+      WHISPER_DEVICE: "auto"
     deploy:
       resources:
         reservations:
