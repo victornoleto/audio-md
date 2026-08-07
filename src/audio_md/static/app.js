@@ -131,6 +131,37 @@ $("#submit").addEventListener("click", async () => {
   }
 });
 
+// ---------------------------------------------------------------- youtube
+
+const urlInput = $("#url-input");
+const urlBtn = $("#url-go");
+
+async function submitUrl() {
+  const url = urlInput.value.trim();
+  if (!url) return;
+  urlBtn.disabled = true;
+  urlBtn.textContent = "Enviando…";
+  try {
+    const form = new FormData();
+    form.append("url", url);
+    const res = await fetch("/api/jobs", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || res.statusText);
+    urlInput.value = "";
+    location.hash = `g/${data.id}`;
+  } catch (err) {
+    alert(`Falha ao enviar: ${err.message}`);
+  } finally {
+    urlBtn.disabled = false;
+    urlBtn.textContent = "Transcrever";
+  }
+}
+
+urlBtn.addEventListener("click", submitUrl);
+urlInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); submitUrl(); }
+});
+
 // ---------------------------------------------------------------- history
 
 async function loadHistory() {
@@ -150,8 +181,8 @@ async function loadHistory() {
 
 // ---------------------------------------------------------------- job
 
-const STATUS_LABEL = { pending: "aguardando", cached: "já transcrito", done: "ok" };
-const PHASE_LABEL = { queued: "Na fila…", summarizing: "Gerando resumo…" };
+const STATUS_LABEL = { pending: "aguardando", downloading: "baixando", cached: "já transcrito", done: "ok" };
+const PHASE_LABEL = { queued: "Na fila…", downloading: "Baixando do YouTube…", summarizing: "Gerando resumo…" };
 
 async function pollJob(id) {
   if (location.hash !== `#g/${id}`) return; // user navigated away; stop polling
@@ -208,7 +239,17 @@ function renderResult(data) {
 
   const meta = $("#result-meta");
   meta.innerHTML = "";
-  (data.meta.files || []).forEach((f, i) => meta.append(el("span", "chip", `${i + 1} · ${f.name}`)));
+  const video = data.meta.youtube;
+  if (video) {
+    const a = el("a", "chip", video.title || video.video_id);
+    a.href = video.url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    meta.append(a);
+    if (video.uploader) meta.append(el("span", "chip plain", video.uploader));
+  } else {
+    (data.meta.files || []).forEach((f, i) => meta.append(el("span", "chip", `${i + 1} · ${f.name}`)));
+  }
   meta.append(el("span", "chip plain", fmtDate(data.meta.created_at)));
 
   // the summary markdown comes from an LLM over arbitrary audio — sanitize it

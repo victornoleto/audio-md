@@ -1,0 +1,11 @@
+services:
+  audio-md:
+    environment:
+      WHISPER_DEVICE: "auto"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

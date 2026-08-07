@@ -23,3 +23,7 @@ dist/
 # Generated output — keep the folder, ignore its contents
 /outputs/*
 !/outputs/.gitkeep
+
+# Audio dropped in for the containerized CLI — same deal
+/inputs/*
+!/inputs/.gitkeep

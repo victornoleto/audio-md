@@ -39,4 +39,25 @@ start stop restart status:  ## controla o serviço (make start|stop|restart|stat
 logs:  ## segue os logs do serviço (journalctl)
 	journalctl --user -u $(UNIT) -f
 
-.PHONY: help deps run test install uninstall start stop restart status logs
+# `=` (lazy), not `:=`: only the docker-* targets pay for the `docker info` call.
+GPU_RUNTIME = $(shell docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -o nvidia | head -1)
+DC = APP_UID=$(shell id -u) APP_GID=$(shell id -g) docker compose -f compose.yaml $(if $(GPU_RUNTIME),-f compose.gpu.yaml)
+
+docker-up:  ## sobe o serviço em container (detecta GPU sozinho)
+	$(DC) up -d --build
+	@echo "✓ audio-md em http://127.0.0.1:$$($(DC) port audio-md 8765 | cut -d: -f2)$(if $(GPU_RUNTIME), · GPU habilitada,)"
+
+docker-down:  ## para e remove o container
+	$(DC) down
+
+docker-logs:  ## segue os logs do container
+	$(DC) logs -f
+
+docker-login:  ## login do CLI de resumo dentro do container (uma vez só)
+	$(DC) run --rm audio-md claude /login
+
+docker-cli:  ## roda o CLI no container (ex.: make docker-cli ARGS="/app/inputs/a.mp3")
+	$(DC) run --rm audio-md audio-md $(ARGS)
+
+.PHONY: help deps run test install uninstall start stop restart status logs \
+        docker-up docker-down docker-logs docker-login docker-cli
