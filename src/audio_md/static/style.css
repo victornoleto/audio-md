@@ -75,32 +75,40 @@ button { font: inherit; cursor: pointer; }
 
 .lede { color: var(--muted); margin: 0 0 2rem; max-width: 34rem; }
 
-.dropzone {
-  position: relative;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 3rem 1.5rem 2.5rem;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color .15s, background .15s;
+.composer {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  padding: 1.5rem; transition: border-color .15s, box-shadow .15s;
 }
-.dropzone:hover, .dropzone.drag { border-color: var(--accent); }
-.dropzone.drag { background: var(--accent-soft); }
-
-.wave { display: flex; justify-content: center; align-items: center; gap: 4px; height: 44px; margin-bottom: 1.25rem; }
-.wave i { width: 4px; border-radius: 2px; background: var(--accent); opacity: .75; height: 18%; }
-.wave i:nth-child(3n)  { height: 55%; }
-.wave i:nth-child(4n)  { height: 90%; }
-.wave i:nth-child(5n)  { height: 35%; }
-.wave i:nth-child(7n)  { height: 70%; }
-.wave i:nth-child(11n) { height: 100%; }
-
-@media (prefers-reduced-motion: no-preference) {
-  .dropzone.drag .wave i { animation: bounce .6s ease-in-out infinite alternate; }
-  .dropzone.drag .wave i:nth-child(2n) { animation-delay: .15s; }
-  .dropzone.drag .wave i:nth-child(3n) { animation-delay: .3s; }
-  @keyframes bounce { from { transform: scaleY(.5); } to { transform: scaleY(1.4); } }
+.composer.drag { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+.dropzone {
+  background: var(--bg); border: 1px dashed var(--line); border-radius: 12px;
+  padding: 1.5rem 1rem; text-align: center;
+}
+.composer.drag .dropzone { background: var(--accent-soft); border-color: var(--accent); }
+.secondary {
+  border: 1px solid var(--line); background: var(--surface); color: var(--accent-ink);
+  border-radius: 8px; padding: .6rem 1rem; margin-top: 1rem; min-height: 44px;
+}
+.secondary:hover:not(:disabled) { border-color: var(--accent); }
+.input-label { display: block; font-weight: 500; margin-top: 1.25rem; }
+.input-hint { color: var(--muted); font-size: .85rem; margin: .5rem 0 0; }
+.input-error { color: var(--danger); font-size: .9rem; margin: .65rem 0 0; overflow-wrap: anywhere; }
+[aria-invalid="true"] { border-color: var(--danger) !important; }
+.composer-footer { border-top: 1px solid var(--line); margin-top: 1.25rem; padding-top: 1rem; }
+.queue-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+#queue-total { margin: 0; font-size: .85rem; color: var(--muted); }
+.text-button { border: 0; background: none; color: var(--muted); padding: .5rem; min-height: 44px; }
+.text-button:hover:not(:disabled) { color: var(--danger); }
+button:disabled { cursor: default; opacity: .5; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#file-list .name { white-space: normal; overflow-wrap: anywhere; }
+#file-list .ctl button { width: 44px; height: 44px; }
+@media (max-width: 520px) {
+  .composer { padding: 1rem; }
+  #file-list .msg { flex-wrap: wrap; gap: .5rem; }
+  #file-list .meta { flex-basis: calc(100% - 2.5rem); }
+  #file-list .ctl { margin-left: auto; }
 }
 
 .dz-label { margin: 0; }
@@ -109,13 +117,13 @@ button { font: inherit; cursor: pointer; }
 
 .url-row { display: flex; gap: .5rem; margin-top: .75rem; }
 
-.url-row input {
+.url-row textarea {
   flex: 1; min-width: 0; font: inherit; font-size: .95rem; color: var(--ink);
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
-  padding: .75rem .9rem;
+  padding: .75rem .9rem; resize: vertical;
 }
-.url-row input::placeholder { color: var(--muted); }
-.url-row input:hover, .url-row input:focus { border-color: var(--accent); }
+.url-row textarea::placeholder { color: var(--muted); }
+.url-row textarea:hover, .url-row textarea:focus { border-color: var(--accent); }
 
 .url-row button {
   flex: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink);

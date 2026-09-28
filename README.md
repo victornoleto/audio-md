@@ -1,6 +1,6 @@
 # audio-md
 
-Transcreve um arquivo de áudio ou um **vídeo do YouTube** localmente e destila o
+Transcreve arquivos de áudio, vídeos locais ou **vídeos do YouTube** e destila o
 conteúdo em um resumo Markdown. A pasta de saída é um trecho curto do **SHA-256**
 do arquivo (ou o **id do vídeo** no YouTube), então a mesma entrada nunca é
 reprocessada.
@@ -45,7 +45,8 @@ Cada etapa imprime um cabeçalho `▸`, então dá para saber sempre onde a exec
 
 ## Instalação
 
-Requer **Python ≥ 3.12**, [uv](https://docs.astral.sh/uv/), `ffmpeg` e — para o
+Requer **Python ≥ 3.12**, [uv](https://docs.astral.sh/uv/), `ffmpeg`, Node ≥ 22
+(para YouTube) e — para o
 resumo — um agent CLI logado: o [`claude` CLI](https://claude.com/claude-code)
 (`claude login`), `opencode` ou `codex`.
 
@@ -58,6 +59,20 @@ uv sync --extra transcribe --extra gpu     # + aceleração GPU (NVIDIA, recomen
 
 `--extra transcribe` traz faster-whisper + CTranslate2. Sem ele o pacote ainda
 roda, mas a transcrição falha até que seja instalado.
+
+O YouTube usa `yt-dlp[default]`, incluindo `yt-dlp-ejs` para os desafios
+JavaScript. Se o Node estiver no NVM, configure seu caminho absoluto no `.env`
+para que o serviço também consiga executá-lo:
+
+```dotenv
+YOUTUBE_NODE_PATH=/home/seu-usuario/.nvm/versions/node/v24.17.0/bin/node
+```
+
+Use o caminho retornado por `command -v node`; atualize-o se remover essa versão
+do NVM. Sem configuração explícita, procura Node (ou Deno) no PATH. O Docker já
+inclui Node 22 e o Compose usa seu caminho interno, ignorando o caminho do host.
+Em HTTP 403, o download extrai URLs novas e tenta mais uma vez. Se persistir,
+o erro identifica o vídeo; cookies do navegador não são importados automaticamente.
 
 Para instalar como comando standalone (e largar o prefixo `uv run`):
 
@@ -102,7 +117,8 @@ O dia a dia: `make docker-logs`, `make docker-down` e
   runtime nvidia, o `make docker-up` liga a GPU sozinho; se não, transcreve na CPU.
 - **Sem GPU, troque o modelo.** O padrão `large-v3` é pesado demais na CPU — use
   `WHISPER_MODEL=small` no `.env`.
-- **Configuração é o mesmo `.env`.** Duas exceções, que o compose declara por conta
+- **Configuração é o mesmo `.env`.** O Compose fixa `YOUTUBE_NODE_PATH` para o Node
+  interno. Há também duas configurações que o compose declara por conta
   própria (o `environment` tem precedência sobre o `env_file`): a **porta** — dentro do
   container o app escuta sempre em 8765, e quem escolhe a porta publicada no host é
   `HOST_PORT`, justamente para um `WEB_PORT=80` não fazer o processo não-root tentar
@@ -151,18 +167,44 @@ Também roda como módulo: `uv run python -m audio_md audio.mp3`.
 make run          # ou: uv run audio-md-web → http://127.0.0.1:8765
 ```
 
-Arraste vários arquivos de áudio como **um grupo só** (pense nos áudios picotados
+Arraste arquivos de áudio e vídeo como **um grupo só** (pense nos áudios picotados
 do WhatsApp sobre o mesmo assunto), ajuste a ordem e receba uma transcrição
 juntada + um único resumo, lado a lado. Os grupos ficam em
 `outputs/groups/{hash-do-grupo}/` e servem de histórico do site; as transcrições
 por arquivo compartilham o cache do CLI em `outputs/audios/`, nos dois sentidos.
 A configuração vem do `.env` (a UI não tem opções).
 
-Também aceita **link do YouTube**: cole a URL no campo abaixo da dropzone e o
-vídeo vira um grupo de um item só. O áudio é baixado, transcrito para
-`outputs/youtube/{video-id}/` — o mesmo cache do CLI, nos dois sentidos — e
-resumido como qualquer outro grupo. Um vídeo já processado pelo CLI não é
-baixado de novo.
+No bloco **Adicionar conteúdo**, arraste áudios e vídeos ou use **Selecionar
+arquivos**. Cole **links do YouTube, um por linha**, e use **Adicionar links**
+para organizá-los na mesma lista. Você também pode clicar diretamente em
+**Transcrever e resumir**: links ainda no campo são incluídos ao final da lista.
+
+A lista identifica cada fonte, permite ajustar a ordem e mostra o tamanho total
+dos arquivos. Links inválidos são indicados por linha antes do envio; arquivos
+não aceitos são identificados pelo nome. Acima de **1 GiB** em arquivos, o envio
+fica bloqueado até remover itens (o servidor também verifica o tamanho completo
+da requisição). Falhas de envio preservam a lista para tentar novamente.
+Todos os itens geram uma transcrição combinada e um resumo único. O cache por vídeo fica em `outputs/youtube/{video-id}/`
+e é compartilhado com o CLI. Grupos com vários itens e vídeos identificam cada
+fonte na transcrição enviada ao resumo.
+
+Vídeos locais (MP4, MOV, MKV, WebM e outros containers compatíveis) usam somente
+a primeira faixa de áudio via PyAV/faster-whisper; imagens não são transcritas
+e não há conversão intermediária em disco. Mídia corrompida, vazia ou sem áudio
+gera erro específico. O limite total de arquivos por envio continua em **1 GiB**.
+O CLI também aceita vídeo local: `uv run audio-md video.mp4`.
+
+Se um item falhar, o grupo para e **não gera resumo parcial**. As transcrições
+concluídas ficam em cache. Volte à fila e reenvie para tentar novamente, inclusive
+se apenas o resumo falhar. A fila permanece enquanto a página estiver aberta;
+após recarregá-la, adicione novamente os arquivos e links. Use **Limpar fila**
+para começar outro grupo.
+
+API: `POST /api/jobs` aceita multipart com `files` e `items` (JSON ordenado), por
+exemplo `[{"type":"youtube","url":"https://youtu.be/OKKSUpDTfXQ"},
+{"type":"file","file_index":0}]`. Cada upload precisa aparecer uma vez no
+manifesto; URLs e índices são validados antes de enfileirar. Envios antigos com
+apenas `url` ou `files` continuam funcionando. Playlists não são expandidas.
 
 ### Rodando como serviço (systemd)
 

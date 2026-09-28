@@ -24,30 +24,46 @@
 
   <!-- Home: dropzone + reorderable queue + history -->
   <section id="view-home" hidden>
-    <h1 class="display">Áudios viram texto.</h1>
-    <p class="lede">Arraste as mensagens de voz — várias partes, um assunto só. Elas são
-    transcritas na ordem e resumidas num texto único. Ou cole o link de um vídeo do YouTube.</p>
+    <h1 class="display">Áudios e vídeos viram texto.</h1>
+    <p class="lede">Adicione áudios, vídeos e links do YouTube sobre o mesmo assunto.
+    Organize a fila: cada item será transcrito na ordem e o grupo terá um resumo único.</p>
 
-    <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Adicionar áudios">
-      <div class="wave" aria-hidden="true">
-        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    <section id="dropzone" class="composer" aria-labelledby="composer-title">
+      <h2 id="composer-title">Adicionar conteúdo</h2>
+      <div class="dropzone">
+        <p class="dz-label"><strong>Arraste áudios e vídeos aqui</strong><span>ou selecione os arquivos do seu dispositivo</span></p>
+        <button id="select-files" class="secondary" type="button">Selecionar arquivos</button>
+        <input id="file-input" type="file" multiple
+               accept="audio/*,video/*,.opus,.ogg,.oga,.m4a,.mp3,.wav,.aac,.flac,.mp4,.mov,.mkv,.webm,.avi,.m4v" hidden>
+        <p class="input-hint">Até 1 GiB por envio · vídeos usam somente o áudio</p>
       </div>
-      <p class="dz-label"><strong>Arraste os áudios aqui</strong><span>ou clique para escolher</span></p>
-      <input id="file-input" type="file" multiple
-             accept="audio/*,.opus,.ogg,.oga,.m4a,.mp3,.wav,.aac,.flac" hidden>
-    </div>
+      <p id="file-error" class="input-error" role="alert" hidden></p>
 
-    <div class="url-row">
-      <input id="url-input" type="url" inputmode="url" autocomplete="off" spellcheck="false"
-             placeholder="ou cole um link do YouTube" aria-label="Link de um vídeo do YouTube">
-      <button id="url-go" type="button">Transcrever</button>
-    </div>
+      <label class="input-label" for="url-input">Links do YouTube — um por linha</label>
+      <div class="url-row">
+        <textarea id="url-input" rows="2" autocomplete="off" spellcheck="false"
+                  placeholder="https://www.youtube.com/watch?v=…" aria-describedby="url-hint url-error"></textarea>
+        <button id="url-go" type="button" disabled>Adicionar links</button>
+      </div>
+      <p id="url-hint" class="input-hint">Você também pode enviar diretamente: os links deste campo serão incluídos ao final da lista.</p>
+      <p id="url-error" class="input-error" role="alert" tabindex="-1" hidden></p>
 
-    <div id="queue" hidden>
-      <p class="hint">Na ordem em que devem ser lidos — use as setas para ajustar.</p>
-      <ol id="file-list" class="thread"></ol>
-      <button id="submit" class="go" type="button">Transcrever e resumir</button>
-    </div>
+      <div id="queue" hidden>
+        <p class="hint">Ordem do conteúdo — use as setas para ajustar.</p>
+        <ol id="file-list" class="thread"></ol>
+      </div>
+      <div class="composer-footer">
+        <div class="queue-toolbar">
+          <p id="queue-total" role="status" aria-live="polite" aria-atomic="true"></p>
+          <button id="clear-queue" class="text-button" type="button" disabled>Limpar fila</button>
+        </div>
+        <p class="input-hint">Os itens serão combinados nesta ordem em um único resumo.</p>
+        <p id="size-error" class="input-error" role="alert" hidden></p>
+        <p id="send-error" class="input-error" role="alert" tabindex="-1" hidden></p>
+        <button id="submit" class="go" type="button" disabled>Transcrever e resumir</button>
+      </div>
+      <span id="queue-announcement" class="sr-only" role="status" aria-live="polite"></span>
+    </section>
 
     <section id="history" hidden>
       <h2 class="section-label">Anteriores</h2>
@@ -57,7 +73,7 @@
 
   <!-- Job: progress or result -->
   <section id="view-job" hidden>
-    <a class="back" href="#">&larr; novos áudios</a>
+    <a class="back" href="#">&larr; editar fila / novo grupo</a>
 
     <div id="job-progress" hidden>
       <h1 id="phase" class="display"></h1>

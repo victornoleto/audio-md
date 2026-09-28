@@ -11,6 +11,10 @@ WorkingDirectory=__DIR__
 ExecStart=__DIR__/.venv/bin/audio-md-web
 # The summary agent CLIs (claude/opencode/codex) are resolved via PATH:
 Environment=PATH=%h/.local/bin:%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin
+# Teto do cgroup (serviço + worker de transcrição). Em CPU o large-v3 pesa ~3,8 GiB,
+# então 6G deixa folga para um job legítimo e ainda assim mata o serviço — não a
+# máquina — se a memória escapar. Com Restart=always o custo é um job perdido.
+MemoryMax=6G
 Restart=always
 RestartSec=3
 

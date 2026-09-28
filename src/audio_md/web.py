@@ -15,9 +15,10 @@ import json
 import os
 import queue
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -74,20 +75,53 @@ def index():
 @app.post("/api/jobs")
 def create_job():
     url = (request.form.get("url") or "").strip()
-    if url:
-        return _create_youtube_job(url)
-
     uploads = request.files.getlist("files")
-    if not uploads:
-        return jsonify({"error": "nenhum arquivo enviado"}), 400
+    try:
+        if "items" in request.form:
+            if url:
+                raise ValueError("use items ou url, não ambos")
+            items = json.loads(request.form["items"])
+        else:
+            items = ([{"type": "youtube", "url": url}] if url else
+                     [{"type": "file", "file_index": i} for i in range(len(uploads))])
+        if not isinstance(items, list) or not items:
+            raise ValueError("nenhum item enviado")
+        indexes = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("item inválido")
+            if item.get("type") == "youtube":
+                value = item.get("url")
+                vid = youtube.video_id_of(value.strip()) if isinstance(value, str) else None
+                if vid is None:
+                    raise ValueError("link do YouTube inválido")
+                item["video_id"] = vid
+            elif item.get("type") == "file":
+                idx = item.get("file_index")
+                if type(idx) is not int or not 0 <= idx < len(uploads):
+                    raise ValueError("referência de arquivo inválida")
+                indexes.append(idx)
+            else:
+                raise ValueError("tipo de item inválido")
+        if sorted(indexes) != list(range(len(uploads))):
+            raise ValueError("cada arquivo deve aparecer exatamente uma vez")
+    except (ValueError, TypeError) as e:
+        return jsonify({"error": str(e)}), 400
 
     tmpdir = Path(tempfile.mkdtemp(prefix="audio-md-web-"))
     try:
         files = []
-        for i, up in enumerate(uploads):
+        for i, item in enumerate(items):
+            if item["type"] == "youtube":
+                files.append({"type": "youtube", "video_id": item["video_id"],
+                              "name": item["url"].strip(), "sha256": None, "path": None,
+                              "status": "pending", "progress": 0.0, "duration_sec": None})
+                continue
+            up = uploads[item["file_index"]]
             path = tmpdir / f"{i:03d}"  # upload names never touch the filesystem
             up.save(path)
             files.append({
+                "type": "file",
                 "name": up.filename or f"audio-{i + 1}",
                 "sha256": sha256_of(path),
                 "path": str(path),
@@ -98,12 +132,13 @@ def create_job():
     except Exception as e:  # noqa: BLE001 — disk full, aborted stream, ...
         shutil.rmtree(tmpdir, ignore_errors=True)
         return jsonify({"error": f"falha ao receber os arquivos: {e}"}), 500
-    gid = group_hash([f["sha256"] for f in files])
+    gid = group_hash([f"youtube:{f['video_id']}" if f["type"] == "youtube" else f["sha256"]
+                      for f in files])
 
     with _jobs_lock:
         # Same group already finished (disk) or already queued/running (memory)?
         existing = _jobs.get(gid)
-        if _finished(gid) or (existing and existing["status"] != "error"):
+        if _finished(gid) or (existing and existing["status"] not in ("error", "done")):
             shutil.rmtree(tmpdir, ignore_errors=True)
             return jsonify({"id": gid}), 201
         job = {"id": gid, "status": "queued", "error": None, "tmpdir": str(tmpdir), "files": files}
@@ -112,30 +147,9 @@ def create_job():
     return jsonify({"id": gid}), 201
 
 
-def _create_youtube_job(url: str):
-    video_id = youtube.video_id_of(url)
-    if video_id is None:
-        return jsonify({"error": "link do YouTube inválido"}), 400
-
-    gid = group_hash([f"youtube:{video_id}"])
-    with _jobs_lock:
-        existing = _jobs.get(gid)
-        if _finished(gid) or (existing and existing["status"] != "error"):
-            return jsonify({"id": gid}), 201
-        job = {
-            "id": gid, "status": "queued", "error": None, "tmpdir": None,
-            "video_id": video_id,
-            "files": [{"name": url, "sha256": None, "path": None,
-                       "status": "pending", "progress": 0.0, "duration_sec": None}],
-        }
-        _jobs[gid] = job
-        _queue.put(job)
-    return jsonify({"id": gid}), 201
-
-
 @app.errorhandler(413)
 def too_large(_e):
-    return jsonify({"error": "upload grande demais (limite: 1 GB)"}), 413
+    return jsonify({"error": "upload grande demais (limite: 1 GiB)"}), 413
 
 
 @app.get("/api/jobs/<gid>")
@@ -200,81 +214,72 @@ def _worker() -> None:
         except Exception as e:  # noqa: BLE001
             job["status"] = "error"
             job["error"] = str(e)
-        finally:
-            if job["tmpdir"]:
-                shutil.rmtree(job["tmpdir"], ignore_errors=True)
 
 
 def _run_job(job: dict) -> None:
-    transcripts = _transcribe_youtube(job) if job.get("video_id") else _transcribe_uploads(job)
-    _finish_group(job, transcripts)
+    try:
+        transcripts = _transcribe_items(job)
+        _finish_group(job, transcripts)
+    except Exception as e:
+        job["status"], job["error"] = "error", str(e)
+        raise
+    finally:
+        if job["tmpdir"]:
+            shutil.rmtree(job["tmpdir"], ignore_errors=True)
 
 
-def _transcribe_uploads(job: dict) -> list[str]:
+def _transcribe_items(job: dict) -> list[str]:
     job["status"] = "transcribing"
-    model = None  # (device, WhisperModel), loaded on the first cache miss and reused
+    model = None  # _ModelProcess do job, criado no primeiro cache miss e reusado
     transcripts: list[str] = []
 
-    for f in job["files"]:
-        fdir = _outdir() / "audios" / f["sha256"][:SHORT_HASH_LEN]
-        tpath = fdir / "transcript.txt"
-        if tpath.exists():  # shared with the CLI cache, both directions
-            f["status"], f["progress"] = "cached", 1.0
+    try:
+        for f in job["files"]:
+            vid = f.get("video_id")
+            fdir = (_outdir() / "youtube" / vid if vid else
+                    _outdir() / "audios" / f["sha256"][:SHORT_HASH_LEN])
+            tpath = fdir / "transcript.txt"
+            if tpath.exists():  # shared with the CLI cache, both directions
+                f["status"], f["progress"] = "cached", 1.0
+                try:
+                    cached = json.loads((fdir / "meta.json").read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    cached = {}
+                f["duration_sec"] = cached.get("duration_sec")
+                f["has_video"] = cached.get("has_video", False)
+                if vid:
+                    f["name"] = cached.get("title") or f["name"]
+                    f["youtube"] = _video_info(cached, vid)
+                transcripts.append(tpath.read_text(encoding="utf-8").strip())
+                continue
+
+            meta = {"source_filename": f["name"], "sha256": f["sha256"]}
             try:
-                f["duration_sec"] = json.loads((fdir / "meta.json").read_text(encoding="utf-8")).get("duration_sec")
-            except Exception:  # noqa: BLE001
-                pass
-            transcripts.append(tpath.read_text(encoding="utf-8").strip())
-            continue
-
-        f["status"] = "transcribing"
-        meta = {"source_filename": f["name"], "sha256": f["sha256"]}
-        text, model = _transcribe_file(Path(f["path"]), f, meta, model)
-        f["duration_sec"] = meta.get("duration_sec")
-        fdir.mkdir(parents=True, exist_ok=True)
-        tpath.write_text(text + "\n", encoding="utf-8")
-        (fdir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        f["status"], f["progress"] = "done", 1.0
-        transcripts.append(text)
-
-    model = None  # release VRAM between jobs  # noqa: F841
+                if vid:
+                    job["status"] = f["status"] = "downloading"
+                    dest = Path(job["tmpdir"]) / vid
+                    dest.mkdir(parents=True, exist_ok=True)
+                    audio, meta = youtube.download_audio(vid, dest)
+                    f["name"] = meta.get("title") or f["name"]
+                    f["youtube"] = _video_info(meta, vid)
+                else:
+                    audio = Path(f["path"])
+                job["status"] = f["status"] = "transcribing"
+                text, model = _transcribe_file(audio, f, meta, model)
+            except Exception as e:
+                f["status"] = "error"
+                raise RuntimeError(f"{f['name']}: {e}") from e
+            f["duration_sec"] = meta.get("duration_sec")
+            f["has_video"] = meta.get("has_video", False)
+            fdir.mkdir(parents=True, exist_ok=True)
+            tpath.write_text(text + "\n", encoding="utf-8")
+            (fdir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            f["status"], f["progress"] = "done", 1.0
+            transcripts.append(text)
+    finally:
+        if model is not None:
+            model.close()  # release memory between jobs (o SO devolve ao matar o worker)
     return transcripts
-
-
-def _transcribe_youtube(job: dict) -> list[str]:
-    video_id = job["video_id"]
-    f = job["files"][0]
-    vdir = _outdir() / "youtube" / video_id
-    tpath = vdir / "transcript.txt"
-
-    if tpath.exists():
-        f["status"], f["progress"] = "cached", 1.0
-        try:
-            cached = json.loads((vdir / "meta.json").read_text(encoding="utf-8"))
-        except Exception:  # noqa: BLE001
-            cached = {}
-        f["name"] = cached.get("title") or f["name"]
-        f["duration_sec"] = cached.get("duration_sec")
-        job["youtube"] = _video_info(cached, video_id)
-        return [tpath.read_text(encoding="utf-8").strip()]
-
-    job["status"] = f["status"] = "downloading"
-    tmp = Path(tempfile.mkdtemp(prefix="audio-md-web-yt-"))
-    job["tmpdir"] = str(tmp)
-    audio, info = youtube.download_audio(video_id, tmp)
-
-    job["status"] = f["status"] = "transcribing"
-    f["name"] = info.get("title") or f["name"]
-    meta = dict(info)  # download_audio already includes video_id
-    text, _ = _transcribe_file(audio, f, meta, None)
-
-    vdir.mkdir(parents=True, exist_ok=True)
-    tpath.write_text(text + "\n", encoding="utf-8")
-    (vdir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    f["status"], f["progress"] = "done", 1.0
-    f["duration_sec"] = meta.get("duration_sec")
-    job["youtube"] = _video_info(meta, video_id)
-    return [text]
 
 
 def _video_info(meta: dict, video_id: str) -> dict:
@@ -288,6 +293,12 @@ def _video_info(meta: dict, video_id: str) -> dict:
 
 def _finish_group(job: dict, transcripts: list[str]) -> None:
     merged = "\n\n".join(t for t in transcripts if t).strip()
+    if len(transcripts) > 1 and any(f.get("youtube") or f.get("has_video") for f in job["files"]):
+        merged = "\n\n".join(
+            f"[{i + 1} · {f['name']}]\n" +
+            (f["youtube"]["url"] + "\n" if f.get("youtube") else "") + t
+            for i, (f, t) in enumerate(zip(job["files"], transcripts)) if t
+        )
     gdir = _group_dir(job["id"])
     gdir.mkdir(parents=True, exist_ok=True)
     (gdir / "transcript.txt").write_text(merged + "\n", encoding="utf-8")
@@ -295,11 +306,11 @@ def _finish_group(job: dict, transcripts: list[str]) -> None:
     meta = {
         "group_hash": job["id"],
         "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "files": [{"name": f["name"], "sha256": f["sha256"], "duration_sec": f["duration_sec"]}
+        "files": [{k: f[k] for k in ("name", "sha256", "duration_sec", "type", "youtube", "has_video") if k in f}
                   for f in job["files"]],
     }
-    if job.get("youtube"):
-        meta["youtube"] = job["youtube"]
+    if len(job["files"]) == 1 and job["files"][0].get("youtube"):
+        meta["youtube"] = job["files"][0]["youtube"]
     # A summary failure must never discard a finished transcript: the job still
     # completes, the error is recorded, and resubmitting the group retries it.
     binary = providers.BINARIES[_settings.provider]
@@ -319,43 +330,69 @@ def _finish_group(job: dict, transcripts: list[str]) -> None:
     job["status"] = "done"
 
 
+class _ModelProcess:
+    """Subprocesso que segura o modelo carregado enquanto um job roda.
+
+    Existe porque o WhisperModel não devolve a memória que aloca: matar o processo
+    é o que a devolve ao SO. Um por job, reusado entre os arquivos daquele job.
+    """
+
+    def __init__(self) -> None:
+        self._p = subprocess.Popen(
+            [sys.executable, "-m", "audio_md.transcribe_worker"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1,
+            # stderr herdado de propósito: os avisos de fallback caem no log do serviço
+        )
+
+    def transcribe(self, audio: Path, f: dict, meta: dict) -> str:
+        """Manda um arquivo e consome o progresso até o resultado final."""
+        req = {
+            "audio": str(audio),
+            "model": _settings.whisper_model,
+            "devices": _transcribe.devices_for(_settings.device),
+            "lang": _settings.lang,
+            "beam_size": _settings.beam_size,
+            "batch_size": _settings.batch_size,
+        }
+        self._p.stdin.write(json.dumps(req) + "\n")
+        self._p.stdin.flush()
+        for line in self._p.stdout:
+            msg = json.loads(line)
+            if "progress" in msg:
+                f["progress"] = msg["progress"]
+                continue
+            if "error" in msg:
+                raise RuntimeError(msg["error"])
+            meta.update(msg["meta"])
+            return msg["text"]
+        raise RuntimeError("worker de transcrição morreu sem responder")
+
+    def close(self) -> None:
+        """Mata o worker — é isto que devolve a memória do modelo ao SO."""
+        if self._p.poll() is not None:
+            return
+        self._p.stdin.close()
+        try:
+            self._p.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            self._p.kill()
+            self._p.wait()
+
+
 def _transcribe_file(audio: Path, f: dict, meta: dict, model):
     """Transcribe one file updating ``f["progress"]``; returns (text, model) for reuse.
 
-    Same device-fallback contract as pipeline._run_transcription, minus the console.
+    ``model`` é o _ModelProcess do job: criado no primeiro arquivo, reusado nos
+    seguintes. O fallback de device acontece dentro dele (ver transcribe_worker).
     """
-    devices = _transcribe.devices_for(_settings.device)
-    if model is not None:  # stick with the device that worked for the previous file
-        devices = sorted(devices, key=lambda d: d[0] != model[0])
-    for i, (device, compute) in enumerate(devices):
-        try:
-            if model is None or model[0] != device:
-                model = (device, _transcribe.load_model(_settings.whisper_model, device, compute))
-            segments, info = _transcribe.start(
-                model[1], audio, _settings.lang,
-                beam_size=_settings.beam_size, batch_size=_settings.batch_size,
-            )
-            t0 = time.time()
-            parts: list[str] = []
-            for seg in segments:
-                parts.append(seg.text)
-                f["progress"] = min(seg.end / info.duration, 1.0) if info.duration else 0.0
-            meta.update({
-                "whisper_model": _settings.whisper_model,
-                "device": device,
-                "beam_size": _settings.beam_size,
-                "batch_size": _settings.batch_size,
-                "language": info.language,
-                "language_probability": round(info.language_probability, 4),
-                "duration_sec": round(info.duration, 2),
-                "transcribe_sec": round(time.time() - t0, 1),
-            })
-            return "".join(parts).strip(), model
-        except Exception:  # noqa: BLE001
-            if i == len(devices) - 1:
-                raise
-            model = None  # GPU backend broke; retry loading on the next device
-    return "", model  # unreachable (last device either returns or raises)
+    if model is not None:
+        return model.transcribe(audio, f, meta), model  # já é do chamador: ele fecha
+    model = _ModelProcess()
+    try:
+        return model.transcribe(audio, f, meta), model
+    except Exception:
+        model.close()  # falhou antes de chegar ao chamador: fecha quem criou
+        raise
 
 
 def start_worker() -> None:
