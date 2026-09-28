@@ -16,6 +16,8 @@ services:
     environment:
       WEB_HOST: "0.0.0.0"
       WEB_PORT: "8765"
+      # Do not inherit an NVM path from the host's .env.
+      YOUTUBE_NODE_PATH: "/usr/local/bin/node"
       # compose.gpu.yaml overrides this to "auto" when make docker-up detects the GPU
       WHISPER_DEVICE: "cpu"
 
