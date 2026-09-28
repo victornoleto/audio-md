@@ -26,6 +26,7 @@ def _run_transcription(audio: Path, settings, meta: dict) -> str:
 
     Updates ``meta`` in place with the device/language/timing actually used.
     """
+    meta.update(_transcribe.inspect_media(audio))
     devices = _transcribe.devices_for(settings.device)
     for i, (device, compute) in enumerate(devices):
         last = i == len(devices) - 1

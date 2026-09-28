@@ -17,6 +17,22 @@ from pathlib import Path
 _COMPUTE = {"cuda": "int8_float16", "cpu": "int8"}
 
 
+def inspect_media(path: Path) -> dict:
+    """Inspect actual container content, including uploads without extensions."""
+    import av
+
+    try:
+        with av.open(str(path)) as container:
+            if not container.streams.audio:
+                raise ValueError("arquivo sem faixa de áudio")
+            # Check decodability before loading the large transcription model.
+            if next(container.decode(audio=0), None) is None:
+                raise ValueError("faixa de áudio vazia")
+            return {"has_video": bool(container.streams.video)}
+    except av.error.FFmpegError as e:
+        raise ValueError(f"mídia inválida ou corrompida: {e}") from e
+
+
 def devices_for(device: str) -> list[tuple[str, str]]:
     """Resolve the configured device into an ordered (device, compute_type) list.
 

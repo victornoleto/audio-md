@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
             "<outdir>/youtube/<video-id>/."
         ),
     )
-    p.add_argument("input", help="Path to an audio file, YouTube URL, or YouTube video id.")
+    p.add_argument("input", help="Path to an audio/video file, YouTube URL, or YouTube video id.")
     p.add_argument("--model", default=None,
                    help="faster-whisper model: tiny/base/small/medium/large-v3 (default: large-v3).")
     p.add_argument("--device", default=None,
